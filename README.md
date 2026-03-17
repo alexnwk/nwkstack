@@ -8,6 +8,16 @@ NWKStack gives you eleven specialized cognitive modes as slash commands — each
 
 ---
 
+## Built on Gstack
+
+NWKStack is a domain-specific adaptation of [Gstack](https://github.com/garrytan/gstack) — a general-purpose Claude Code workflow toolkit built around the same core insight: explicit cognitive modes outperform a single generic assistant.
+
+Gstack's gears are for software development: founder taste, engineering rigor, paranoid review, release execution. NWKStack ports that infrastructure to quantitative trading, replacing the development workflow with the strategy lifecycle: alpha generation, system architecture, adversarial validation, risk governance, live deployment.
+
+The skill system, template pipeline, session tracking, test tiers, and retro snapshot pattern all carry over directly from Gstack.
+
+---
+
 ## The Problem
 
 A trading strategy that looks good on paper and dies in live trading is not a strategy. It's expensive research.
@@ -138,7 +148,7 @@ NWKStack is not a trading system. It is a methodology and a set of cognitive too
 
 ```bash
 # Install to Claude Code's skills directory
-git clone https://github.com/yourusername/nwkstack.git ~/.claude/skills/nwkstack
+git clone https://github.com/alexnwk/nwkstack.git ~/.claude/skills/nwkstack
 cd ~/.claude/skills/nwkstack
 ./setup
 ```
