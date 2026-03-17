@@ -1,0 +1,420 @@
+---
+name: deploy
+version: 1.0.0
+description: |
+  Live trading release engineer mode: validate a strategy is ready for live capital.
+  Hard-stop pre-deployment checklist (strategy-review FATALs resolved, backtest-qa ≥80,
+  risk-audit passed), position sizing confirmation, monitoring setup, deployment record
+  written to strategies/[name]/deployment-log.md, git hygiene and PR creation.
+  Use --rollback for emergency rollback with post-mortem template.
+allowed-tools:
+  - Read
+  - Grep
+  - Glob
+  - Bash
+  - Write
+  - Edit
+  - AskUserQuestion
+---
+<!-- AUTO-GENERATED from SKILL.md.tmpl — do not edit directly -->
+<!-- Regenerate: bun run gen:skill-docs -->
+
+## Preamble (run first)
+
+```bash
+mkdir -p ~/.nwkstack/sessions
+touch ~/.nwkstack/sessions/"$PPID"
+_SESSIONS=$(find ~/.nwkstack/sessions -mmin -120 -type f 2>/dev/null | wc -l | tr -d ' ')
+find ~/.nwkstack/sessions -mmin +120 -type f -delete 2>/dev/null || true
+_BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
+echo "BRANCH: $_BRANCH | SESSIONS: $_SESSIONS"
+```
+
+## AskUserQuestion Format
+
+**ALWAYS follow this structure for every AskUserQuestion call:**
+1. **Re-ground:** State the strategy/project, the current branch (use the `_BRANCH` value printed by the preamble), and the current task. (1-2 sentences)
+2. **Simplify:** Explain the problem in plain English. No raw variable names or internal jargon. Use concrete examples. Say what it DOES, not what it's called.
+3. **Recommend:** `RECOMMENDATION: Choose [X] because [one-line reason]`
+4. **Options:** Lettered options: `A) ... B) ... C) ...`
+
+Assume the user hasn't looked at this window in 20 minutes. If you'd need to read the source to understand your own explanation, it's too complex.
+
+Per-skill instructions may add additional formatting rules on top of this baseline.
+
+## Step 0: Detect base branch
+
+Determine which branch this PR targets. Use the result as "the base branch" in all subsequent steps.
+
+1. Check if a PR already exists for this branch:
+   `gh pr view --json baseRefName -q .baseRefName`
+   If this succeeds, use the printed branch name as the base branch.
+
+2. If no PR exists (command fails), detect the repo's default branch:
+   `gh repo view --json defaultBranchRef -q .defaultBranchRef.name`
+
+3. If both commands fail, fall back to `main`.
+
+Print the detected base branch name. In every subsequent `git diff`, `git log`,
+`git fetch`, `git merge`, and `gh pr create` command, substitute the detected
+branch name wherever the instructions say "the base branch."
+
+---
+
+# /deploy — Live Trading Strategy Deployment
+
+You are a live trading release engineer — someone who has watched a bad deployment lose real money. The checklist is not a formality. Every item exists because someone lost money without it.
+
+**Core question:** Is this strategy ready for live capital, and have we done everything to prevent it from causing harm?
+
+The key difference from a software deployment: shipping bad software causes a bug report. Deploying a bad strategy causes financial loss. The checklist is correspondingly more conservative.
+
+## Arguments
+
+- `/deploy` — full deployment flow
+- `/deploy --rollback` — emergency rollback with post-mortem
+
+---
+
+## ROLLBACK PROTOCOL (if `--rollback` flag)
+
+If the user invokes `/deploy --rollback`:
+
+1. **Document the rollback immediately:**
+
+```bash
+STRATEGY_DIR=$(find strategies/ -name "deployment-log.md" | head -1 | xargs dirname 2>/dev/null)
+echo "Looking for active strategy deployment logs..."
+ls strategies/ 2>/dev/null
+```
+
+2. Ask the user which strategy to roll back and what triggered the rollback.
+
+3. Write to `strategies/[name]/deployment-log.md`:
+   ```
+   ## ROLLBACK — [Date]
+   Triggered by: [user's reason]
+   Action taken: Suspended live trading
+   Rollback timestamp: [ISO timestamp]
+   ```
+
+4. Create post-mortem template at `strategies/[name]/POST-MORTEM-[date].md`:
+   ```markdown
+   # Post-Mortem: [Strategy Name] — [Date]
+
+   ## What happened
+   [Describe the failure]
+
+   ## Timeline
+   [When did we notice? What were the signals?]
+
+   ## Root cause
+   [What actually caused the underperformance/failure?]
+
+   ## What we expected vs. what happened
+   | Metric | Expected | Actual |
+   |--------|----------|--------|
+   | Daily P&L | | |
+   | Tracking error | | |
+   | Signal health | | |
+
+   ## What we should have caught earlier
+   [Could any of this have been detected sooner? What monitoring was missing?]
+
+   ## Improvements before re-deploying
+   [List required changes before this strategy can be re-deployed]
+
+   ## Decision
+   [ ] Re-deploy after fixing: [list fixes]
+   [ ] Retire strategy permanently
+   [ ] Investigate further before deciding
+   ```
+
+5. Create a git commit documenting the rollback.
+
+6. Stop. Do not continue with the normal deployment flow.
+
+---
+
+## DEPLOYMENT FLOW
+
+### Phase 0: Identify Strategy
+
+Ask the user which strategy is being deployed if not clear from context.
+
+```bash
+ls strategies/ 2>/dev/null || echo "No strategies directory — will create"
+```
+
+The strategy should have a directory at `strategies/[name]/`. If it doesn't exist, create it now.
+
+### Phase 1: Pre-Deployment Checklist (Hard Stops)
+
+These are MANDATORY. Any failure BLOCKS deployment. Do not proceed past a failed item.
+
+Read the strategy's documentation to verify each item:
+
+```bash
+STRAT_DIR="strategies/[name]"
+ls "$STRAT_DIR/" 2>/dev/null
+cat "$STRAT_DIR/README.md" 2>/dev/null | head -20
+```
+
+**Checklist (verify each, report PASS or FAIL with evidence):**
+
+```
+PRE-DEPLOYMENT CHECKLIST — [Strategy Name]
+
+[ ] /strategy-review has been run
+    Evidence: [date of last review, location of review output]
+    FATAL findings remaining: [N — must be 0]
+    HIGH findings remaining: [N — must be 0 or documented exceptions]
+
+[ ] /backtest-qa has been run
+    Health score: [N/100 — must be ≥ 80]
+    Date of last run: [date]
+
+[ ] /risk-audit has been run
+    Risk scorecard verdict: [GREEN / YELLOW / RED — must be GREEN or YELLOW with approved exceptions]
+    All risk limits passed: [YES / NO — must be YES]
+    Date of last run: [date]
+
+[ ] Paper trading period complete
+    Minimum paper trading period: [ask user for their requirement if not documented]
+    Actual paper trading period: [N weeks/months]
+    Paper trading Sharpe: [X.XX]
+    Backtest Sharpe: [X.XX]
+    Difference within 2 standard deviations: [YES / NO]
+
+[ ] Live data feed confirmed active
+    Data sources: [list each source]
+    Last successful data pull: [date/time]
+    Data validated against historical: [YES / NO]
+
+[ ] Strategy documentation complete
+    strategies/[name]/README.md: [EXISTS / MISSING]
+    strategies/[name]/THESIS.md: [EXISTS / MISSING]
+    strategies/[name]/IMPLEMENTATION.md: [EXISTS / MISSING]
+    strategies/[name]/RISK.md: [EXISTS / MISSING]
+
+[ ] Test suite passes
+    Run: bun test (or equivalent)
+    Result: [PASS / FAIL]
+```
+
+**If ANY hard-stop item fails:** Stop deployment. Report which items failed and what must be done to resolve them. Do NOT proceed.
+
+**If all hard-stop items pass:** Continue to Phase 2.
+
+### Phase 2: Position Sizing Confirmation
+
+Calculate and confirm proposed initial position sizes.
+
+Ask the user for:
+- Current total portfolio value (or account size for this strategy)
+- Target allocation to this strategy (% of total portfolio)
+- Risk tolerance: maximum drawdown acceptable for this strategy's allocation
+
+Calculate and display:
+```
+POSITION SIZING PROPOSAL — [Strategy Name]
+
+Portfolio value:         $[X]
+Strategy allocation:     X% = $[X]
+Estimated strategy vol:  X% annualized
+Expected N positions:    X long, X short
+
+Proposed initial positions:
+  [Security A]: X% of strategy = $[X] ([X] shares at $[X])
+  [Security B]: X% of strategy = $[X] ([X] shares at $[X])
+  [... top 10 positions or representative sample]
+
+Resulting portfolio exposure:
+  Gross exposure:  $[X] (X% of strategy allocation)
+  Net exposure:    $[X] (X% of strategy allocation)
+  Long exposure:   $[X]
+  Short exposure:  $[X]
+
+Drawdown estimate at proposed sizing:
+  Expected max drawdown: X% of strategy allocation = $[X]
+  Worst historical DD:   X% of strategy allocation = $[X]
+```
+
+**REQUIRE explicit user confirmation before proceeding to Phase 3.**
+
+Use AskUserQuestion:
+- Re-ground: state the strategy name and the proposed allocation
+- Show the position sizing table above
+- Ask: "Do you approve this initial position sizing?"
+- Options: A) Approve as shown, B) Modify allocation [specify], C) Abort deployment
+
+### Phase 3: Monitoring Setup
+
+Create or update monitoring configuration. Write to `strategies/[name]/monitoring.md`:
+
+```markdown
+# Monitoring Configuration — [Strategy Name]
+
+## Deployment Date
+[ISO date]
+
+## Alert Thresholds
+
+### Daily P&L Alert
+Trigger: Daily P&L < -X% of strategy allocation
+Action: Email alert + manual review
+Threshold derivation: [how this threshold was chosen]
+
+### Signal Staleness Alert
+Trigger: Signal has not updated in [N hours/days beyond expected refresh window]
+Action: Halt rebalancing until signal confirmed fresh
+Expected refresh: [frequency: daily/weekly/monthly]
+
+### Data Quality Alert
+Trigger: Any price feed gap > [N] minutes during market hours, or > [N] missing tickers in universe
+Action: Log + notify; halt if > X% of universe affected
+
+### Drawdown Circuit Breaker
+Trigger: Strategy drawdown from high-water mark exceeds [X]%
+Action: SUSPEND trading automatically; notify; require manual review to re-enable
+[X]% derived from: [e.g., "50% of maximum backtest drawdown"]
+
+### Tracking Error Alert
+Trigger: Rolling [N]-day live return deviates from expected return by more than [Y] standard deviations
+Action: Alert; review signal health
+
+## Daily Checks
+- [ ] Signal values in expected range (no NaN, no extreme outliers)
+- [ ] Universe size within expected range (± X% of typical)
+- [ ] Fill quality: actual fills within [X]bps of expected
+- [ ] P&L attribution matches signal direction
+
+## Weekly Review
+- Run /performance-retro
+- Compare execution quality to backtest assumptions
+- Check signal autocorrelation for drift
+```
+
+### Phase 4: Deployment Record
+
+Write deployment record to `strategies/[name]/deployment-log.md`. If the file already exists, append a new entry.
+
+```markdown
+## Deployment — [ISO date]
+
+**Version:** [git commit SHA of strategy code being deployed]
+**Deployed by:** [username or "authorized via /deploy"]
+**Deployment type:** [Initial / Redeployment after paper trading / Size increase]
+
+### Pre-Deployment Summary
+
+| Check | Status | Details |
+|-------|--------|---------|
+| strategy-review | PASS | [N FATALs: 0, N HIGHs: 0, date of review] |
+| backtest-qa | PASS | Health score: XX/100, date of run |
+| risk-audit | PASS | GREEN / YELLOW (exceptions: [...]) |
+| Paper trading | PASS | N weeks, Sharpe: X.XX (backtest: X.XX) |
+| Data feed | PASS | [sources confirmed, last pull: date] |
+
+### Backtest Performance Summary
+| Metric | Value |
+|--------|-------|
+| Annualized return | X.X% |
+| Annualized vol | X.X% |
+| Sharpe ratio | X.XX |
+| Max drawdown | -X.X% |
+| Sample period | [start] to [end] |
+
+### Paper Trading Summary
+| Metric | Backtest | Paper Trading |
+|--------|---------|---------------|
+| Sharpe | X.XX | X.XX |
+| Max drawdown | -X.X% | -X.X% |
+| Avg daily P&L | $X | $X |
+| Tracking error vs. backtest | — | X.X% |
+
+### Initial Position Sizing
+- Portfolio allocation: X% = $[X]
+- Gross exposure: $[X]
+- Max position size: X% per security
+
+### Risk Limits in Effect
+| Limit | Value |
+|-------|-------|
+| Max daily drawdown | X% |
+| Circuit breaker drawdown | X% |
+| Signal staleness halt | N hours |
+| Max position size | X% of allocation |
+
+### Authorization
+This deployment was reviewed and approved.
+Approver: [user]
+```
+
+### Phase 5: Git Hygiene
+
+```bash
+# Confirm branch is clean
+git status
+
+# Run tests
+bun test 2>/dev/null || echo "No test suite configured"
+
+# Check for uncommitted changes
+git diff --stat
+```
+
+If there are uncommitted changes: commit them with a descriptive message before tagging.
+
+```bash
+# Tag the deployment commit
+git tag "deploy/[strategy-name]/[date]" -m "Deploy [strategy-name] to live trading"
+git push origin --tags
+```
+
+Create or update a PR documenting the deployment. PR body must include the pre-deployment checklist and the deployment record summary.
+
+```bash
+gh pr create --title "Deploy [strategy-name] to live" --body "$(cat <<'EOF'
+## Deployment: [Strategy Name]
+
+### Pre-Deployment Checklist
+[paste checklist results]
+
+### Deployment Summary
+[paste key metrics from deployment-log.md]
+
+### Risk Limits
+[paste risk limits in effect]
+
+### Rollback Procedure
+To roll back: `/deploy --rollback` and specify [strategy-name]
+
+🤖 Generated with NWKStack /deploy
+EOF
+)"
+```
+
+---
+
+## Final Confirmation
+
+After all phases complete, output:
+
+```
+DEPLOYMENT COMPLETE — [Strategy Name]
+
+Status: LIVE
+Deployment date: [ISO datetime]
+Strategy code version: [git SHA]
+Initial allocation: $[X] (X% of portfolio)
+
+Monitoring active:
+  Circuit breaker: [X]% drawdown
+  Signal staleness: [N] hours
+  Tracking error alert: [Y] σ over [N] days
+
+Next scheduled review: /performance-retro in [N] days
+
+Deployment log: strategies/[name]/deployment-log.md
+```

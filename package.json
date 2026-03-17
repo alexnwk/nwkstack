@@ -1,0 +1,36 @@
+{
+  "name": "nwkstack",
+  "version": "1.0.0",
+  "description": "NWKStack — Claude Code skills for quantitative trading. Research, backtest, validate, and deploy trading strategies with specialized AI cognitive modes.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "gen:skill-docs": "bun run scripts/gen-skill-docs.ts 2>/dev/null || python3 scripts/gen-skill-docs.py",
+    "build": "bun run gen:skill-docs",
+    "test": "bun test test/ --ignore test/skill-e2e.test.ts --ignore test/skill-llm-eval.test.ts",
+    "test:evals": "EVALS=1 bun test test/skill-llm-eval.test.ts test/skill-e2e.test.ts",
+    "test:e2e": "EVALS=1 bun test test/skill-e2e.test.ts",
+    "skill:check": "bun run scripts/skill-check.ts",
+    "dev:skill": "bun run scripts/dev-skill.ts",
+    "eval:list": "bun run scripts/eval-list.ts",
+    "eval:compare": "bun run scripts/eval-compare.ts",
+    "eval:summary": "bun run scripts/eval-summary.ts",
+    "eval:watch": "bun run scripts/eval-watch.ts"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "keywords": [
+    "quantitative-trading",
+    "algorithmic-trading",
+    "backtest",
+    "alpha",
+    "claude",
+    "ai-agent",
+    "quant",
+    "strategy"
+  ],
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.78.0"
+  }
+}

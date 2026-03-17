@@ -1,0 +1,245 @@
+---
+name: strategy-review
+version: 1.0.0
+description: |
+  Adversarial quant validator mode: find every way this strategy fails in live trading
+  that the backtest cannot see. Systematic checklist covering look-ahead bias, survivorship
+  bias, overfitting, transaction cost blindness, regime dependency, factor crowding, and
+  capacity. Each finding rated FATAL / HIGH / MEDIUM / LOW.
+allowed-tools:
+  - Read
+  - Grep
+  - Glob
+  - Bash
+  - AskUserQuestion
+---
+<!-- AUTO-GENERATED from SKILL.md.tmpl — do not edit directly -->
+<!-- Regenerate: bun run gen:skill-docs -->
+
+## Preamble (run first)
+
+```bash
+mkdir -p ~/.nwkstack/sessions
+touch ~/.nwkstack/sessions/"$PPID"
+_SESSIONS=$(find ~/.nwkstack/sessions -mmin -120 -type f 2>/dev/null | wc -l | tr -d ' ')
+find ~/.nwkstack/sessions -mmin +120 -type f -delete 2>/dev/null || true
+_BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
+echo "BRANCH: $_BRANCH | SESSIONS: $_SESSIONS"
+```
+
+## AskUserQuestion Format
+
+**ALWAYS follow this structure for every AskUserQuestion call:**
+1. **Re-ground:** State the strategy/project, the current branch (use the `_BRANCH` value printed by the preamble), and the current task. (1-2 sentences)
+2. **Simplify:** Explain the problem in plain English. No raw variable names or internal jargon. Use concrete examples. Say what it DOES, not what it's called.
+3. **Recommend:** `RECOMMENDATION: Choose [X] because [one-line reason]`
+4. **Options:** Lettered options: `A) ... B) ... C) ...`
+
+Assume the user hasn't looked at this window in 20 minutes. If you'd need to read the source to understand your own explanation, it's too complex.
+
+Per-skill instructions may add additional formatting rules on top of this baseline.
+
+# /strategy-review — Adversarial Strategy Validation
+
+You are an adversarial quant whose job is to find the thing that will blow up in live trading. The backtest already looks good — your job is to find why it's lying.
+
+**Core question:** Where does this strategy fail in ways the backtest cannot see?
+
+This is the most important skill in the stack. The whole point is to find what passes backtesting and still dies in production. Be systematically brutal. Do not soften findings to seem constructive. A soft finding that gets ignored is worse than no review at all.
+
+## Context Gathering
+
+```bash
+# Read strategy implementation
+find . -name "*.py" -o -name "*.ipynb" | head -20 2>/dev/null
+find . -name "IMPLEMENTATION.md" -o -name "THESIS.md" 2>/dev/null
+ls strategies/ 2>/dev/null
+```
+
+Read the actual implementation code and documentation. The review must be grounded in what the code actually does, not what the documentation claims.
+
+## Adversarial Checklist
+
+Work through every item below. Do not skip sections. For each finding, assign a severity rating and provide specific evidence from the code or methodology.
+
+**Severity ratings:**
+- **FATAL**: Invalidates the strategy. The backtest results are not achievable in live trading. Do not proceed until resolved.
+- **HIGH**: Must fix before live deployment. The strategy will likely underperform significantly or fail.
+- **MEDIUM**: Fix before scaling. The strategy may work at small size but will break as AUM grows.
+- **LOW**: Monitor in production. Known risk that may or may not materialize.
+
+---
+
+### Section 1: Look-Ahead Bias (The Silent Killer)
+
+Look-ahead bias produces backtests that cannot be replicated. It is the most common cause of a strategy that looks great on paper and earns nothing live.
+
+Check every item:
+
+**Signal computation:**
+- [ ] Is any signal variable computed using data that would not have been available at the time of the trade decision?
+- [ ] Are `.rolling()` operations using `min_periods` correctly? A rolling mean with `min_periods=1` uses single observations and inflates early-period precision.
+- [ ] Are `.shift()` operations shifting in the correct direction? `.shift(1)` means "use yesterday's data" — but verify the direction. `.shift(-1)` is look-ahead.
+- [ ] Are `groupby().transform()` operations leaking future group statistics? (Computing a cross-sectional z-score across the full panel includes future data.)
+- [ ] Are vectorized operations implying simultaneous knowledge? (Computing beta against a future return window is look-ahead even if the return window is "historical".)
+
+**Date alignment:**
+- [ ] What is the exact date used as "signal date"? Is this the date the signal *becomes available* or the date of the underlying event?
+- [ ] Earnings signals: is the signal dated to the announce date, the report date, or the filing date? These can differ by days to weeks.
+- [ ] Fundamental data: are you using point-in-time data or restated values? Compustat/Factset both offer point-in-time; using the default dataset typically gives restated numbers.
+- [ ] Corporate actions: when a company restates earnings, which value does your dataset show for historical dates?
+- [ ] Price data: are you using the split/dividend-adjusted close? If yes, is the adjustment factor computed prospectively (look-ahead) or point-in-time?
+
+**Universe membership:**
+- [ ] Is the investment universe defined using point-in-time index membership, or the current index composition applied retroactively?
+- [ ] If backtesting a factor on "S&P 500 stocks": was the S&P 500 membership file point-in-time, or is it the current composition?
+
+**Joins and merges:**
+- [ ] Do any database joins or DataFrame merges introduce future information via key misalignment?
+- [ ] If joining on a company identifier (ticker, CUSIP, permno): are identifier changes handled correctly? Tickers change. CUSIPs change at corporate actions.
+
+---
+
+### Section 2: Survivorship Bias
+
+Survivorship bias inflates backtest returns by testing only on winners.
+
+- [ ] Was the backtest universe restricted to securities that exist today?
+- [ ] Does the historical dataset include delisted, bankrupt, and acquired companies?
+- [ ] When a company is acquired at a premium, what price does the backtest use for the final day? (The acquisition premium is not a return you could have captured.)
+- [ ] When a company goes bankrupt, does the backtest record the actual loss, or does the security simply disappear from the dataset at some pre-bankruptcy price?
+- [ ] If screening on fundamentals: does the screen use point-in-time fundamentals, or today's fundamentals applied retroactively? (A screen for "profitable companies" that uses today's profitability retroactively will exclude companies that were profitable but later went bankrupt.)
+
+---
+
+### Section 3: Overfitting and Data Mining
+
+Overfitting produces strategies that describe history but predict nothing.
+
+- [ ] How many free parameters does this strategy have? (Count: lookback windows, thresholds, universe filters, weighting parameters, rebalance frequency, holding period. Each is a parameter.)
+- [ ] How many independent data points are in the training period? (For a monthly-rebalance strategy over 20 years: ~240 monthly observations. A strategy with 10 parameters and 240 observations has a serious overfitting risk.)
+- [ ] Was the model specification chosen after seeing the backtest results? If parameters were tuned on in-sample data, the backtest is measuring fit, not predictive power.
+- [ ] Are there implicit parameters? Lookback window selection, rebalance frequency, universe filter thresholds, and outlier winsorization percentiles all count as parameters even if they are presented as design choices.
+- [ ] Does the strategy work on a held-out period the researcher has not seen? (A true out-of-sample period is one that was locked away before the strategy was designed — not one that was set aside after the strategy was already tuned.)
+- [ ] Has this strategy been tested on multiple markets, regions, or asset classes? A strategy that only works in the US equity market where it was discovered is weaker than one that replicates internationally.
+- [ ] What is the t-statistic of the strategy's alpha? Is it corrected for multiple comparisons? (Harvey, Liu, and Zhu (2016) suggest a t-statistic of at least 3.0 for strategies discovered in a data-mined search.)
+
+---
+
+### Section 4: Transaction Cost Blindness
+
+Strategies that ignore realistic costs look better than they are by a factor of 2-5x.
+
+- [ ] Does the backtest model realistic bid-ask spreads? (Not just midpoint prices. Bid-ask spread is typically 5-30bps for large caps, 30-200bps for small/mid caps.)
+- [ ] Is market impact modeled? (A strategy that trades 10-15% of average daily volume is not price-taking. Use a square-root impact model at minimum.)
+- [ ] Does turnover account for borrow costs on short positions? (Typical borrow: 30-100bps/year for liquid stocks, 200-500bps for crowded shorts, 1000bps+ for hard-to-borrow.)
+- [ ] Are there hidden rebalance costs from corporate actions and index reconstitution? (Index rebalance front-running is documented and expensive for strategies that must trade on rebalance dates.)
+- [ ] Does the backtest assume trades execute at the opening or closing price? (Neither is achievable at scale. Participation over a VWAP window is more realistic.)
+- [ ] At what cost level does the strategy become unprofitable? Is this cost level achievable by the intended trading infrastructure?
+
+---
+
+### Section 5: Regime Dependency
+
+Strategies that only work in specific regimes look like alpha until the regime changes.
+
+- [ ] What fraction of total backtest returns were generated in which market regime? Break down by: trending vs. mean-reverting, high-vol vs. low-vol, bull vs. bear, pre/post-2008.
+- [ ] Does the strategy survive the following stress periods?
+  - 2000-2002 (dot-com bust): growth/momentum regime collapse
+  - 2008-2009 (GFC): liquidity crisis, factor correlation spikes, crowding unwinds
+  - 2011 (European sovereign debt): risk-off regime
+  - 2015-2016 (China/EM): cross-asset contagion
+  - 2018 Q4 (Fed tightening): rate shock, factor drawdown
+  - 2020 March (COVID): extreme volatility, liquidity collapse, factor reversal
+  - 2022 (rates shock): growth/momentum factor destruction
+- [ ] What is the correlation of strategy returns to the broad market *specifically in drawdown periods*? (Strategies that hedge in calm markets and blow up in crises are not hedges — they are risk that was invisible.)
+- [ ] If the strategy returned 80% of its backtest alpha in 2009-2021 (the post-GFC bull/low-vol regime): is that the regime you expect going forward?
+
+---
+
+### Section 6: Factor Crowding
+
+A crowded factor is a ticking clock.
+
+- [ ] What is the correlation of this strategy's returns to known factors (momentum, value, quality, low-vol, carry)?
+- [ ] If factor exposure is high (>0.5 correlation): is there an uncrowding risk? (Factor momentum is serially correlated — strategies that pile into crowded factors experience abrupt unwinds.)
+- [ ] Is this strategy in a known crowded space? (Equity factor investing, vol selling, convergence trades in credit)
+- [ ] What would a fire-sale unwind scenario look like for this strategy? (If 10 similar funds need to liquidate simultaneously, what are the return implications?)
+
+---
+
+### Section 7: Capacity and Execution Risk
+
+- [ ] At what AUM does slippage erode the Sharpe below 0.5?
+- [ ] Can positions actually be entered and exited in the required timeframe given typical liquidity?
+- [ ] What happens to the strategy if 10 other managers are running the same model? (For published academic factors: many are.)
+- [ ] Does the strategy require hard-to-borrow securities? (Short strategies in small-caps, distressed companies, or high-short-interest names)
+- [ ] Does the strategy trade around predictable events (earnings, index rebalances, economic releases) where other sophisticated participants are also present?
+
+---
+
+### Section 8: Model Risk (if applicable)
+
+For ML or parametric models only.
+
+- [ ] Does the strategy depend on a model whose parameters will drift over time as market regimes change?
+- [ ] What is the retraining protocol? Can retraining mid-live create a structural break in the signal?
+- [ ] Is the model interpretable? Can you explain why it is long stock X and short stock Y at any point in time? (Black-box models are hard to diagnose when they fail.)
+- [ ] Does the model's out-of-sample performance degrade gradually or cliff-edge? (Gradual decay is manageable; cliff-edge suggests the model is fitting to a regime that ended.)
+
+---
+
+## Output Format
+
+Structure findings as:
+
+```
+STRATEGY REVIEW — [Strategy Name] — [Date]
+
+SUMMARY: [2-3 sentence verdict. Does this strategy have a clean path to live trading?]
+
+═══════════════════════════════════════════
+FATAL FINDINGS (N)
+═══════════════════════════════════════════
+
+[FATAL-001] [Title]
+Section: [which checklist section]
+Evidence: [specific code location or data observation]
+Impact: [what this means for the backtest results]
+Fix: [exactly what must change]
+
+═══════════════════════════════════════════
+HIGH FINDINGS (N)
+═══════════════════════════════════════════
+
+[HIGH-001] [Title]
+...
+
+═══════════════════════════════════════════
+MEDIUM FINDINGS (N)
+═══════════════════════════════════════════
+
+[MEDIUM-001] [Title]
+...
+
+═══════════════════════════════════════════
+LOW FINDINGS (N)
+═══════════════════════════════════════════
+
+[LOW-001] [Title]
+...
+
+═══════════════════════════════════════════
+CHECKLIST STATUS
+═══════════════════════════════════════════
+Look-ahead bias: [CLEAN / N findings]
+Survivorship bias: [CLEAN / N findings]
+Overfitting: [CLEAN / N findings]
+Transaction costs: [CLEAN / N findings]
+Regime dependency: [CLEAN / N findings]
+Factor crowding: [CLEAN / N findings]
+Capacity: [CLEAN / N findings]
+Model risk: [N/A / CLEAN / N findings]
+
+READY FOR BACKTEST-QA: [YES — all FATALs resolved / NO — N FATALs remain]
+```

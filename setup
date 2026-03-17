@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# nwkstack setup — generate skill docs + register all skills with Claude Code
+set -e
+
+NWKSTACK_DIR="$(cd "$(dirname "$0")" && pwd)"
+SKILLS_DIR="$(dirname "$NWKSTACK_DIR")"
+
+# 1. Generate skill docs (Bun if available, Python fallback)
+(
+  cd "$NWKSTACK_DIR"
+  if command -v bun >/dev/null 2>&1; then
+    echo "Generating skill docs (bun)..."
+    bun install && bun run gen:skill-docs
+  elif command -v python3 >/dev/null 2>&1; then
+    echo "Generating skill docs (python3 fallback — install bun for full functionality)..."
+    python3 scripts/gen-skill-docs.py
+  else
+    echo "Warning: neither bun nor python3 found. Skill docs may be stale."
+    echo "Install bun: https://bun.sh"
+  fi
+)
+
+# 2. Ensure ~/.nwkstack global state directory exists
+mkdir -p "$HOME/.nwkstack/sessions" "$HOME/.nwkstack/retros"
+
+# 3. Only create skill symlinks if we're inside a .claude/skills directory
+SKILLS_BASENAME="$(basename "$SKILLS_DIR")"
+if [ "$SKILLS_BASENAME" = "skills" ]; then
+  linked=()
+  for skill_dir in "$NWKSTACK_DIR"/*/; do
+    if [ -f "$skill_dir/SKILL.md" ]; then
+      skill_name="$(basename "$skill_dir")"
+      # Skip node_modules and scripts
+      [ "$skill_name" = "node_modules" ] && continue
+      [ "$skill_name" = "scripts" ] && continue
+      [ "$skill_name" = "test" ] && continue
+      [ "$skill_name" = "bin" ] && continue
+      [ "$skill_name" = "strategies" ] && continue
+      target="$SKILLS_DIR/$skill_name"
+      # Create or update symlink; skip if a real file/directory exists
+      if [ -L "$target" ] || [ ! -e "$target" ]; then
+        ln -snf "nwkstack/$skill_name" "$target"
+        linked+=("$skill_name")
+      fi
+    fi
+  done
+
+  echo "nwkstack ready."
+  if [ ${#linked[@]} -gt 0 ]; then
+    echo "  linked skills: ${linked[*]}"
+  fi
+else
+  echo "nwkstack ready."
+  echo "  (skipped skill symlinks — not inside .claude/skills/)"
+  echo "  To install: place this directory at ~/.claude/skills/nwkstack and run ./setup"
+fi
+
+echo ""
+echo "Available skills:"
+echo "  /alpha-thesis      — Pressure-test an investment thesis"
+echo "  /system-design     — Design the technical architecture"
+echo "  /strategy-review   — Adversarial strategy validation"
+echo "  /backtest-qa       — Backtest integrity audit"
+echo "  /risk-audit        — Standalone risk assessment"
+echo "  /paper-to-poc      — Academic paper to proof of concept"
+echo "  /regime-analysis   — Market regime classification"
+echo "  /deploy            — Live trading deployment"
+echo "  /performance-retro — Live performance review"
+echo "  /strategy-doc      — Strategy documentation maintenance"
+echo "  /data-connect      — Data infrastructure audit"

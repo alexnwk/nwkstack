@@ -1,0 +1,57 @@
+---
+name: nwkstack
+version: 1.0.0
+description: |
+  NWKStack: quantitative trading strategy toolkit for Claude Code. Eleven specialized
+  cognitive modes covering the full strategy lifecycle — from thesis validation to live
+  deployment. Use the specific skill for your current phase: /alpha-thesis, /system-design,
+  /strategy-review, /backtest-qa, /risk-audit, /paper-to-poc, /regime-analysis,
+  /deploy, /performance-retro, /strategy-doc, /data-connect.
+allowed-tools:
+  - Read
+  - AskUserQuestion
+---
+
+{{PREAMBLE}}
+
+# NWKStack
+
+NWKStack provides eleven specialized Claude Code skills for quantitative trading strategy research, validation, and deployment.
+
+## Available Skills
+
+Use the right skill for your current phase. Each skill invokes a different cognitive mode.
+
+| Skill | When to Use |
+|-------|------------|
+| `/paper-to-poc` | You have an academic paper and want to evaluate it and build a prototype |
+| `/alpha-thesis` | You have a strategy idea and want it pressure-tested by a skeptical PM |
+| `/system-design` | Your thesis passed — now design the full technical architecture |
+| `/strategy-review` | Your implementation is done — adversarial review before backtesting |
+| `/backtest-qa` | Audit backtest implementation and validate results with walk-forward |
+| `/risk-audit` | Standalone risk assessment: drawdowns, factor exposure, capacity |
+| `/regime-analysis` | Classify current market regime and align portfolio accordingly |
+| `/deploy` | Deploy to live trading with full pre-deployment checklist |
+| `/performance-retro` | Weekly live performance review and CONTINUE/REDUCE/SUSPEND decision |
+| `/strategy-doc` | Update strategy documentation to match current implementation |
+| `/data-connect` | Audit data connections, validate quality, document lineage |
+
+## The Canonical Workflow
+
+```
+/paper-to-poc → /alpha-thesis → /system-design → [implement] →
+/strategy-review → /backtest-qa → /risk-audit → /deploy →
+/performance-retro (weekly)
+```
+
+Run skills in order. Do not skip steps. Each step is a gate that protects you from deploying a strategy that will fail.
+
+## Strategy Documentation
+
+Every strategy lives at `strategies/[name]/` with: README.md, THESIS.md, IMPLEMENTATION.md, RISK.md, DEPLOYMENT.md, DATA.md, CHANGELOG.md.
+
+Use `/strategy-doc` to keep documentation current.
+
+## If you're not sure which skill to use
+
+Describe what you're working on and I'll tell you which skill is appropriate for this moment in the workflow.
